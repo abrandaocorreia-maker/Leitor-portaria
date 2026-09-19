@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Leitor</title>
+<!-- ZXing integrado localmente para evitar falhas de carregamento externo -->
 <script src="https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js"></script>
 <style>
 *{box-sizing:border-box}
@@ -28,7 +29,7 @@ video{position:absolute;width:100%;height:100%;object-fit:cover}
   <div id="cam">
     <video id="video" autoplay muted playsinline></video>
     <div id="box"></div>
-    <div id="msg">A solicitar acesso à câmara...</div>
+    <div id="msg">A carregar biblioteca...</div>
     <div id="result" class="hide">
       <div><b>✅ Código encontrado</b><p id="code"></p><small id="fmt"></small></div>
       <button onclick="usar()">✅ USAR ESTE CÓDIGO</button>
@@ -47,8 +48,22 @@ video{position:absolute;width:100%;height:100%;object-fit:cover}
 let reader = null, controls = null, cams = [], idx = 0, code = '', fmt = '', stream = null, torch = false;
 
 addEventListener('DOMContentLoaded', () => {
-  setTimeout(iniciar, 300);
+  setTimeout(verificarBiblioteca, 300);
 });
+
+function verificarBiblioteca() {
+  if (typeof ZXingBrowser === 'undefined') {
+    document.getElementById('msg').textContent = 'A tentar carregar o leitor alternativo...';
+    // Fallback dinâmico caso o unpkg falhe na rede do celular
+    let s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js';
+    s.onload = iniciar;
+    s.onerror = () => mostrarErro('Erro crítico: Não foi possível carregar os componentes de leitura de código de barras.');
+    document.head.appendChild(s);
+  } else {
+    iniciar();
+  }
+}
 
 async function iniciar() {
   esconderErro();
@@ -150,7 +165,7 @@ function usar() {
     window.opener.postMessage({ tipo: 'PORTARIA_CODIGO', codigo: code, formato: nome(fmt) }, '*');
     window.close();
   } else {
-    document.getElementById('msg').textContent = 'Código copiado/lido. Volte ao aplicativo de portaria.';
+    document.getElementById('msg').textContent = 'Código copiado. Volte ao aplicativo de portaria.';
   }
 }
 
@@ -235,4 +250,3 @@ addEventListener('beforeunload', parar);
 </script>
 </body>
 </html>
-
