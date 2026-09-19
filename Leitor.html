@@ -3,234 +3,73 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Leitor</title>
-<!-- Motor de leitura integrado para evitar falhas de rede no telemóvel -->
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
+<title>Registar Encomenda</title>
 <style>
 *{box-sizing:border-box}
-html,body{margin:0;width:100%;height:100%;background:#000;color:#fff;font-family:Arial;overflow:hidden}
-#app{height:100%;display:flex;flex-direction:column}
-header,footer{background:#111;padding:10px;display:flex;gap:8px;align-items:center}
-header{justify-content:space-between}
-button{border:0;border-radius:9px;padding:12px;background:#333;color:#fff;font-weight:bold}
-#cam{position:relative;flex:1;min-height:0}
-video{position:absolute;width:100%;height:100%;object-fit:cover}
-#box{position:absolute;left:8%;right:8%;top:50%;height:210px;transform:translateY(-50%);border:3px solid #20d66b;border-radius:16px;box-shadow:0 0 0 9999px #0005;pointer-events:none}
-#msg{position:absolute;left:12px;right:12px;bottom:20px;text-align:center;background:#000b;padding:11px;border-radius:10px}
-#result,#error{position:absolute;inset:0;background:#111;z-index:4;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:25px;text-align:center}
-#result>div{max-width:600px;width:100%;padding:16px;border:2px solid #20d66b;border-radius:12px;word-break:break-word}
-#result button,#error button{width:100%;max-width:600px;margin-top:10px}
-.hide{display:none!important}
+html,body{margin:0;width:100%;height:100%;background:#111;color:#fff;font-family:Arial;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:20px;text-align:center}
+.card{background:#222;padding:25px;border-radius:16px;max-width:400px;width:100%;box-shadow:0 4px 15px rgba(0,0,0,0.5)}
+h2{margin-top:0;color:#20d66b}
+p{color:#aaa;font-size:14px;margin-bottom:20px}
+button, label.btn-foto{display:block;width:100%;border:0;border-radius:10px;padding:15px;background:#20d66b;color:#000;font-weight:bold;font-size:16px;cursor:pointer;text-align:center;margin-top:12px;text-decoration:none}
+label.btn-foto{background:#20d66b}
+.btn-voltar{background:#444;color:#fff}
+input[type="file"]{display:none}
+#preview{margin-top:15px;max-width:100%;max-height:200px;border-radius:8px;display:none}
 </style>
 </head>
 <body>
-<div id="app">
-  <header><b>📷 Ler etiqueta</b><button onclick="fechar()">✕</button></header>
-  <div id="cam">
-    <video id="video" autoplay muted playsinline></video>
-    <div id="box"></div>
-    <div id="msg">A solicitar acesso à câmara...</div>
-    <div id="result" class="hide">
-      <div><b>✅ Código encontrado</b><p id="code"></p><small id="fmt"></small></div>
-      <button onclick="usar()">✅ USAR ESTE CÓDIGO</button>
-      <button onclick="novamente()">📷 LER NOVAMENTE</button>
-    </div>
-    <div id="error" class="hide">
-      <h2>📷 Câmara não disponível</h2>
-      <p id="errorText"></p>
-      <button onclick="iniciar()">🔄 Tentar novamente</button>
-      <button onclick="fechar()">← Voltar</button>
-    </div>
-  </div>
-  <footer><button onclick="trocar()">🔄 Trocar câmara</button><button onclick="lanterna()">🔦 Lanterna</button></footer>
+
+<div class="card">
+  <h2>📷 Foto da Encomenda</h2>
+  <p>Tire uma foto nítida da etiqueta ou da encomenda para registo.</p>
+
+  <!-- Botão que abre diretamente a câmara do telemóvel -->
+  <label for="camInput" class="btn-foto">📸 Tirar Foto</label>
+  <input type="file" id="camInput" accept="image/*" capture="environment" onchange="mostrarFoto(event)">
+
+  <img id="preview" alt="Pré-visualização da foto">
+
+  <button id="btnUsar" class="hide" style="display:none;" onclick="usarFoto()">✅ USAR ESTA FOTO</button>
+  <button class="btn-voltar" onclick="fechar()">← Voltar</button>
 </div>
+
 <script>
-let codeReader = null, cams = [], idx = 0, code = '', fmt = '', stream = null, torch = false, scanning = false;
+let imagemBase64 = '';
 
-addEventListener('DOMContentLoaded', () => {
-  setTimeout(iniciar, 300);
-});
+function mostrarFoto(event) {
+  let file = event.target.files[0];
+  if (!file) return;
 
-async function iniciar() {
-  esconderErro();
-  parar();
-  code = '';
-  document.getElementById('msg').textContent = 'A solicitar acesso à câmara...';
-
-  try {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('API de câmara não suportada neste navegador.');
-    }
-
-    codeReader = new ZXing.BrowserMultiFormatReader();
-    
-    try {
-      cams = await codeReader.listVideoInputDevices();
-      idx = traseira(cams);
-    } catch (err) {
-      cams = [];
-    }
-
-    let selectedDeviceId = cams.length > 0 && cams[idx] ? cams[idx].deviceId : undefined;
-
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : { facingMode: { ideal: 'environment' } },
-      audio: false
-    });
-
-    const v = document.getElementById('video');
-    v.srcObject = stream;
-    await v.play();
-
-    document.getElementById('msg').textContent = 'Aponte para o QR Code ou código de barras...';
-    scanning = true;
-    
-    // Leitura contínua otimizada
-    codeReader.decodeFromVideoDevice(selectedDeviceId, 'video', (result, err) => {
-      if (result && scanning) {
-        detect(result);
-      }
-    });
-
-  } catch (e) {
-    console.error(e);
-    mostrarErro(msgErro(e));
-  }
+  let reader = new FileReader();
+  reader.onload = function(e) {
+    imagemBase64 = e.target.result;
+    let img = document.getElementById('preview');
+    img.src = imagemBase64;
+    img.style.display = 'block';
+    document.getElementById('btnUsar').style.display = 'block';
+  };
+  reader.readAsDataURL(file);
 }
 
-function traseira(a) {
-  for (let i = 0; i < a.length; i++) {
-    let s = (a[i].label || '').toLowerCase();
-    if (s.includes('back') || s.includes('rear') || s.includes('traseira') || s.includes('principal')) return i;
-  }
-  return 0;
-}
-
-function detect(r) {
-  if (!scanning || code) return;
-  scanning = false;
-  
-  try { code = r.getText(); } catch (e) { code = String(r.text || ''); }
-  if (!code) { scanning = true; return; }
-  
-  try { fmt = r.getBarcodeFormat(); } catch (e) { fmt = 'Código detectado'; }
-  
-  parar();
-  document.getElementById('code').textContent = code;
-  document.getElementById('fmt').textContent = 'Tipo: ' + nome(fmt);
-  document.getElementById('result').classList.remove('hide');
-}
-
-function nome(f) {
-  return ({
-    0: 'AZTEC',
-    1: 'CODABAR',
-    2: 'CODE_39',
-    3: 'CODE_93',
-    4: 'CODE_128',
-    5: 'DATA_MATRIX',
-    6: 'EAN_8',
-    7: 'EAN_13',
-    8: 'ITF',
-    9: 'MAXICODE',
-    10: 'PDF_417',
-    11: 'QR_CODE',
-    12: 'RSS_14',
-    13: 'RSS_EXPANDED',
-    14: 'UPC_A',
-    15: 'UPC_E',
-    16: 'UPC_EAN_EXTENSION'
-  })[f] || f || 'Código detectado';
-}
-
-function usar() {
-  if (window.opener && !window.opener.closed) {
-    window.opener.postMessage({ tipo: 'PORTARIA_CODIGO', codigo: code, formato: nome(fmt) }, '*');
-    window.close();
-  } else {
-    document.getElementById('msg').textContent = 'Código copiado. Volte ao aplicativo de portaria.';
-  }
-}
-
-function novamente() {
-  document.getElementById('result').classList.add('hide');
-  iniciar();
-}
-
-function parar() {
-  scanning = false;
-  try {
-    if (codeReader) codeReader.reset();
-  } catch (e) {}
-  if (stream) {
-    stream.getTracks().forEach(t => t.stop());
-    stream = null;
-  }
-  let v = document.getElementById('video');
-  if (v && v.srcObject) {
-    v.srcObject.getTracks().forEach(t => t.stop());
-    v.srcObject = null;
-  }
-  torch = false;
-}
-
-async function trocar() {
-  if (cams.length < 2) {
-    alert('Não há outra câmara disponível.');
+function usarFoto() {
+  if (!imagemBase64) {
+    alert('Nenhuma foto capturada.');
     return;
   }
-  parar();
-  idx = (idx + 1) % cams.length;
-  await iniciar();
-}
 
-async function lanterna() {
-  let v = document.getElementById('video'), t = v?.srcObject?.getVideoTracks()[0];
-  if (!t) return;
-  try {
-    let c = t.getCapabilities();
-    if (!c.torch) {
-      alert('Lanterna não disponível nesta câmara.');
-      return;
-    }
-    torch = !torch;
-    await t.applyConstraints({ advanced: [{ torch }] });
-  } catch (e) {
-    alert('Não foi possível controlar a lanterna.');
+  if (window.opener && !window.opener.closed) {
+    // Envia a foto (ou um aviso de foto capturada) de volta para a aplicação principal
+    window.opener.postMessage({ tipo: 'PORTARIA_FOTO', codigo: 'FOTO_REGISTRADA', imagem: imagemBase64 }, '*');
+    window.close();
+  } else {
+    alert('Foto pronta! Volte ao aplicativo de portaria.');
   }
-}
-
-function msgErro(e) {
-  if (e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError') {
-    return 'O acesso à câmara foi bloqueado. Por favor, permita a câmara nas definições/permissões do navegador e tente novamente.';
-  }
-  if (e?.name === 'NotFoundError' || e?.name === 'DevicesNotFoundError') {
-    return 'Nenhuma câmara foi encontrada neste dispositivo.';
-  }
-  if (e?.name === 'NotReadableError' || e?.name === 'TrackStartError') {
-    return 'A câmara está a ser utilizada por outro aplicativo ou aba.';
-  }
-  if (e?.name === 'SecurityError') {
-    return 'O navegador bloqueou a câmara por questões de segurança (verifique se está a usar HTTPS).';
-  }
-  return e?.message || 'Não foi possível aceder à câmara. Verifique as permissões do navegador e tente novamente.';
-}
-
-function mostrarErro(t) {
-  document.getElementById('errorText').textContent = t;
-  document.getElementById('error').classList.remove('hide');
-}
-
-function esconderErro() {
-  document.getElementById('error').classList.add('hide');
 }
 
 function fechar() {
-  parar();
   window.close();
 }
-
-addEventListener('beforeunload', parar);
 </script>
+
 </body>
 </html>
