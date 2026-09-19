@@ -1,19 +1,238 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Leitor</title><script src="https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js"></script><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#000;color:#fff;font-family:Arial;overflow:hidden}#app{height:100%;display:flex;flex-direction:column}header,footer{background:#111;padding:10px;display:flex;gap:8px;align-items:center}header{justify-content:space-between}button{border:0;border-radius:9px;padding:12px;background:#333;color:#fff;font-weight:bold}#cam{position:relative;flex:1;min-height:0}video{position:absolute;width:100%;height:100%;object-fit:cover}#box{position:absolute;left:8%;right:8%;top:50%;height:210px;transform:translateY(-50%);border:3px solid #20d66b;border-radius:16px;box-shadow:0 0 0 9999px #0005;pointer-events:none}#msg{position:absolute;left:12px;right:12px;bottom:20px;text-align:center;background:#000b;padding:11px;border-radius:10px}#result,#error{position:absolute;inset:0;background:#111;z-index:4;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:25px;text-align:center}#result>div{max-width:600px;width:100%;padding:16px;border:2px solid #20d66b;border-radius:12px;word-break:break-word}#result button,#error button{width:100%;max-width:600px;margin-top:10px}.hide{display:none!important}</style></head><body><div id="app"><header><b>📷 Ler etiqueta</b><button onclick="fechar()">✕</button></header><div id="cam"><video id="video" autoplay muted playsinline></video><div id="box"></div><div id="msg">Solicitando acesso à câmera...</div><div id="result" class="hide"><div><b>✅ Código encontrado</b><p id="code"></p><small id="fmt"></small></div><button onclick="usar()">✅ USAR ESTE CÓDIGO</button><button onclick="novamente()">📷 LER NOVAMENTE</button></div><div id="error" class="hide"><h2>📷 Câmera não disponível</h2><p id="errorText"></p><button onclick="iniciar()">🔄 Tentar novamente</button><button onclick="fechar()">← Voltar</button></div></div><footer><button onclick="trocar()">🔄 Trocar câmera</button><button onclick="lanterna()">🔦 Lanterna</button></footer></div><script>
-let reader=null,controls=null,cams=[],idx=0,code='',fmt='',stream=null,torch=false;
-addEventListener('DOMContentLoaded',iniciar);
-async function iniciar(){esconderErro();parar();code='';try{reader=new ZXingBrowser.BrowserMultiFormatReader();stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});const v=document.getElementById('video');v.srcObject=stream;await v.play();try{cams=await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();idx=traseira(cams)}catch(e){cams=[]}document.getElementById('msg').textContent='Aponte para o QR Code ou código de barras...';await scan()}catch(e){mostrarErro(msgErro(e))}}
-function traseira(a){for(let i=0;i<a.length;i++){let s=(a[i].label||'').toLowerCase();if(s.includes('back')||s.includes('rear')||s.includes('traseira'))return i}return 0}
-async function scan(){try{let id=cams[idx]?.deviceId||null;controls=await reader.decodeFromVideoDevice(id,document.getElementById('video'),(r)=>{if(r)detect(r)})}catch(e){console.error(e);mostrarErro('A câmera foi autorizada, mas o leitor não conseguiu iniciar.')}}
-function detect(r){if(code)return;try{code=r.getText()}catch(e){code=String(r.text||'')}if(!code)return;try{fmt=r.getBarcodeFormat()}catch(e){fmt='Código detectado'}parar();document.getElementById('code').textContent=code;document.getElementById('fmt').textContent='Tipo: '+nome(fmt);document.getElementById('result').classList.remove('hide')}
-function nome(f){return ({QR_CODE:'QR Code',CODE_128:'Código 128',CODE_39:'Código 39',CODE_93:'Código 93',EAN_13:'EAN-13',EAN_8:'EAN-8',UPC_A:'UPC-A',UPC_E:'UPC-E',ITF:'ITF',CODABAR:'Codabar',DATA_MATRIX:'Data Matrix',PDF_417:'PDF417',AZTEC:'Aztec'})[f]||f||'Código detectado'}
-function usar(){if(window.opener&&!window.opener.closed){window.opener.postMessage({tipo:'PORTARIA_CODIGO',codigo:code,formato:nome(fmt)},'*');window.close()}else{document.getElementById('msg').textContent='Volte ao aplicativo de portaria.'}}
-function novamente(){document.getElementById('result').classList.add('hide');iniciar()}
-function parar(){try{controls?.stop()}catch(e){}controls=null;try{reader?.reset()}catch(e){}if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}let v=document.getElementById('video');if(v.srcObject){v.srcObject.getTracks().forEach(t=>t.stop());v.srcObject=null}torch=false}
-async function trocar(){if(cams.length<2){alert('Não há outra câmera disponível.');return}parar();idx=(idx+1)%cams.length;try{stream=await navigator.mediaDevices.getUserMedia({video:{deviceId:{exact:cams[idx].deviceId}},audio:false});document.getElementById('video').srcObject=stream;await document.getElementById('video').play();await scan()}catch(e){mostrarErro('Não foi possível trocar de câmera.')}}
-async function lanterna(){let v=document.getElementById('video'),t=v.srcObject?.getVideoTracks()[0];if(!t)return;try{let c=t.getCapabilities();if(!c.torch){alert('Lanterna não disponível nesta câmera.');return}torch=!torch;await t.applyConstraints({advanced:[{torch}]})}catch(e){alert('Não foi possível controlar a lanterna.')}}
-function msgErro(e){if(e?.name==='NotAllowedError')return 'O acesso à câmera foi bloqueado. Permita a câmera nas permissões do navegador e tente novamente.';if(e?.name==='NotFoundError')return 'Nenhuma câmera foi encontrada.';if(e?.name==='NotReadableError')return 'A câmera está sendo usada por outro aplicativo.';if(e?.name==='SecurityError')return 'O navegador bloqueou a câmera. Use uma página HTTPS.';return 'Não foi possível acessar a câmera. Verifique a permissão e tente novamente.'}
-function mostrarErro(t){document.getElementById('errorText').textContent=t;document.getElementById('error').classList.remove('hide')}
-function esconderErro(){document.getElementById('error').classList.add('hide')}
-function fechar(){parar();window.close()}
-addEventListener('beforeunload',parar);
-</script></body></html>
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Leitor</title>
+<script src="https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js"></script>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;background:#000;color:#fff;font-family:Arial;overflow:hidden}
+#app{height:100%;display:flex;flex-direction:column}
+header,footer{background:#111;padding:10px;display:flex;gap:8px;align-items:center}
+header{justify-content:space-between}
+button{border:0;border-radius:9px;padding:12px;background:#333;color:#fff;font-weight:bold}
+#cam{position:relative;flex:1;min-height:0}
+video{position:absolute;width:100%;height:100%;object-fit:cover}
+#box{position:absolute;left:8%;right:8%;top:50%;height:210px;transform:translateY(-50%);border:3px solid #20d66b;border-radius:16px;box-shadow:0 0 0 9999px #0005;pointer-events:none}
+#msg{position:absolute;left:12px;right:12px;bottom:20px;text-align:center;background:#000b;padding:11px;border-radius:10px}
+#result,#error{position:absolute;inset:0;background:#111;z-index:4;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:25px;text-align:center}
+#result>div{max-width:600px;width:100%;padding:16px;border:2px solid #20d66b;border-radius:12px;word-break:break-word}
+#result button,#error button{width:100%;max-width:600px;margin-top:10px}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <header><b>📷 Ler etiqueta</b><button onclick="fechar()">✕</button></header>
+  <div id="cam">
+    <video id="video" autoplay muted playsinline></video>
+    <div id="box"></div>
+    <div id="msg">A solicitar acesso à câmara...</div>
+    <div id="result" class="hide">
+      <div><b>✅ Código encontrado</b><p id="code"></p><small id="fmt"></small></div>
+      <button onclick="usar()">✅ USAR ESTE CÓDIGO</button>
+      <button onclick="novamente()">📷 LER NOVAMENTE</button>
+    </div>
+    <div id="error" class="hide">
+      <h2>📷 Câmara não disponível</h2>
+      <p id="errorText"></p>
+      <button onclick="iniciar()">🔄 Tentar novamente</button>
+      <button onclick="fechar()">← Voltar</button>
+    </div>
+  </div>
+  <footer><button onclick="trocar()">🔄 Trocar câmara</button><button onclick="lanterna()">🔦 Lanterna</button></footer>
+</div>
+<script>
+let reader = null, controls = null, cams = [], idx = 0, code = '', fmt = '', stream = null, torch = false;
+
+addEventListener('DOMContentLoaded', () => {
+  setTimeout(iniciar, 300);
+});
+
+async function iniciar() {
+  esconderErro();
+  parar();
+  code = '';
+  document.getElementById('msg').textContent = 'A solicitar acesso à câmara...';
+
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('API de câmara não suportada neste navegador.');
+    }
+
+    try {
+      cams = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+      idx = traseira(cams);
+    } catch (err) {
+      cams = [];
+    }
+
+    let constraints = {
+      video: cams.length > 0 && cams[idx] ? { deviceId: { exact: cams[idx].deviceId } } : { facingMode: { ideal: 'environment' } },
+      audio: false
+    };
+
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const v = document.getElementById('video');
+    v.srcObject = stream;
+    
+    await new Promise((resolve, reject) => {
+      v.onloadedmetadata = () => {
+        v.play().then(resolve).catch(reject);
+      };
+      setTimeout(resolve, 1000);
+    });
+
+    document.getElementById('msg').textContent = 'Aponte para o QR Code ou código de barras...';
+    
+    reader = new ZXingBrowser.BrowserMultiFormatReader();
+    await scan();
+
+  } catch (e) {
+    console.error(e);
+    mostrarErro(msgErro(e));
+  }
+}
+
+function traseira(a) {
+  for (let i = 0; i < a.length; i++) {
+    let s = (a[i].label || '').toLowerCase();
+    if (s.includes('back') || s.includes('rear') || s.includes('traseira') || s.includes('principal')) return i;
+  }
+  return 0;
+}
+
+async function scan() {
+  try {
+    let id = cams[idx]?.deviceId || undefined;
+    controls = await reader.decodeFromVideoDevice(id, document.getElementById('video'), (r) => {
+      if (r) detect(r);
+    });
+  } catch (e) {
+    console.error(e);
+    mostrarErro('A câmara foi autorizada, mas o leitor de códigos não conseguiu iniciar.');
+  }
+}
+
+function detect(r) {
+  if (code) return;
+  try { code = r.getText(); } catch (e) { code = String(r.text || ''); }
+  if (!code) return;
+  try { fmt = r.getBarcodeFormat(); } catch (e) { fmt = 'Código detectado'; }
+  
+  parar();
+  document.getElementById('code').textContent = code;
+  document.getElementById('fmt').textContent = 'Tipo: ' + nome(fmt);
+  document.getElementById('result').classList.remove('hide');
+}
+
+function nome(f) {
+  return ({
+    QR_CODE: 'QR Code',
+    CODE_128: 'Código 128',
+    CODE_39: 'Código 39',
+    CODE_93: 'Código 93',
+    EAN_13: 'EAN-13',
+    EAN_8: 'EAN-8',
+    UPC_A: 'UPC-A',
+    UPC_E: 'UPC-E',
+    ITF: 'ITF',
+    CODABAR: 'Codabar',
+    DATA_MATRIX: 'Data Matrix',
+    PDF_417: 'PDF417',
+    AZTEC: 'Aztec'
+  })[f] || f || 'Código detectado';
+}
+
+function usar() {
+  if (window.opener && !window.opener.closed) {
+    window.opener.postMessage({ tipo: 'PORTARIA_CODIGO', codigo: code, formato: nome(fmt) }, '*');
+    window.close();
+  } else {
+    document.getElementById('msg').textContent = 'Código copiado/lido. Volte ao aplicativo de portaria.';
+  }
+}
+
+function novamente() {
+  document.getElementById('result').classList.add('hide');
+  iniciar();
+}
+
+function parar() {
+  try { if (controls) controls.stop(); } catch (e) {}
+  controls = null;
+  try { if (reader) reader.reset(); } catch (e) {}
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  let v = document.getElementById('video');
+  if (v && v.srcObject) {
+    v.srcObject.getTracks().forEach(t => t.stop());
+    v.srcObject = null;
+  }
+  torch = false;
+}
+
+async function trocar() {
+  if (cams.length < 2) {
+    alert('Não há outra câmara disponível.');
+    return;
+  }
+  parar();
+  idx = (idx + 1) % cams.length;
+  await iniciar();
+}
+
+async function lanterna() {
+  let v = document.getElementById('video'), t = v?.srcObject?.getVideoTracks()[0];
+  if (!t) return;
+  try {
+    let c = t.getCapabilities();
+    if (!c.torch) {
+      alert('Lanterna não disponível nesta câmara.');
+      return;
+    }
+    torch = !torch;
+    await t.applyConstraints({ advanced: [{ torch }] });
+  } catch (e) {
+    alert('Não foi possível controlar a lanterna.');
+  }
+}
+
+function msgErro(e) {
+  if (e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError') {
+    return 'O acesso à câmara foi bloqueado. Por favor, permita a câmara nas definições/permissões do navegador e tente novamente.';
+  }
+  if (e?.name === 'NotFoundError' || e?.name === 'DevicesNotFoundError') {
+    return 'Nenhuma câmara foi encontrada neste dispositivo.';
+  }
+  if (e?.name === 'NotReadableError' || e?.name === 'TrackStartError') {
+    return 'A câmara está a ser utilizada por outro aplicativo ou aba.';
+  }
+  if (e?.name === 'SecurityError') {
+    return 'O navegador bloqueou a câmara por questões de segurança (verifique se está a usar HTTPS).';
+  }
+  return e?.message || 'Não foi possível aceder à câmara. Verifique as permissões do navegador e tente novamente.';
+}
+
+function mostrarErro(t) {
+  document.getElementById('errorText').textContent = t;
+  document.getElementById('error').classList.remove('hide');
+}
+
+function esconderErro() {
+  document.getElementById('error').classList.add('hide');
+}
+
+function fechar() {
+  parar();
+  window.close();
+}
+
+addEventListener('beforeunload', parar);
+</script>
+</body>
+</html>
+
