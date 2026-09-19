@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Leitor</title>
-<!-- ZXing integrado localmente para evitar falhas de carregamento externo -->
-<script src="https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js"></script>
+<!-- Motor de leitura integrado para evitar falhas de rede no telemóvel -->
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;background:#000;color:#fff;font-family:Arial;overflow:hidden}
@@ -29,7 +29,7 @@ video{position:absolute;width:100%;height:100%;object-fit:cover}
   <div id="cam">
     <video id="video" autoplay muted playsinline></video>
     <div id="box"></div>
-    <div id="msg">A carregar biblioteca...</div>
+    <div id="msg">A solicitar acesso à câmara...</div>
     <div id="result" class="hide">
       <div><b>✅ Código encontrado</b><p id="code"></p><small id="fmt"></small></div>
       <button onclick="usar()">✅ USAR ESTE CÓDIGO</button>
@@ -45,25 +45,11 @@ video{position:absolute;width:100%;height:100%;object-fit:cover}
   <footer><button onclick="trocar()">🔄 Trocar câmara</button><button onclick="lanterna()">🔦 Lanterna</button></footer>
 </div>
 <script>
-let reader = null, controls = null, cams = [], idx = 0, code = '', fmt = '', stream = null, torch = false;
+let codeReader = null, cams = [], idx = 0, code = '', fmt = '', stream = null, torch = false, scanning = false;
 
 addEventListener('DOMContentLoaded', () => {
-  setTimeout(verificarBiblioteca, 300);
+  setTimeout(iniciar, 300);
 });
-
-function verificarBiblioteca() {
-  if (typeof ZXingBrowser === 'undefined') {
-    document.getElementById('msg').textContent = 'A tentar carregar o leitor alternativo...';
-    // Fallback dinâmico caso o unpkg falhe na rede do celular
-    let s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js';
-    s.onload = iniciar;
-    s.onerror = () => mostrarErro('Erro crítico: Não foi possível carregar os componentes de leitura de código de barras.');
-    document.head.appendChild(s);
-  } else {
-    iniciar();
-  }
-}
 
 async function iniciar() {
   esconderErro();
@@ -76,33 +62,35 @@ async function iniciar() {
       throw new Error('API de câmara não suportada neste navegador.');
     }
 
+    codeReader = new ZXing.BrowserMultiFormatReader();
+    
     try {
-      cams = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+      cams = await codeReader.listVideoInputDevices();
       idx = traseira(cams);
     } catch (err) {
       cams = [];
     }
 
-    let constraints = {
-      video: cams.length > 0 && cams[idx] ? { deviceId: { exact: cams[idx].deviceId } } : { facingMode: { ideal: 'environment' } },
-      audio: false
-    };
+    let selectedDeviceId = cams.length > 0 && cams[idx] ? cams[idx].deviceId : undefined;
 
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
-    const v = document.getElementById('video');
-    v.srcObject = stream;
-    
-    await new Promise((resolve, reject) => {
-      v.onloadedmetadata = () => {
-        v.play().then(resolve).catch(reject);
-      };
-      setTimeout(resolve, 1000);
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : { facingMode: { ideal: 'environment' } },
+      audio: false
     });
 
+    const v = document.getElementById('video');
+    v.srcObject = stream;
+    await v.play();
+
     document.getElementById('msg').textContent = 'Aponte para o QR Code ou código de barras...';
+    scanning = true;
     
-    reader = new ZXingBrowser.BrowserMultiFormatReader();
-    await scan();
+    // Leitura contínua otimizada
+    codeReader.decodeFromVideoDevice(selectedDeviceId, 'video', (result, err) => {
+      if (result && scanning) {
+        detect(result);
+      }
+    });
 
   } catch (e) {
     console.error(e);
@@ -118,22 +106,13 @@ function traseira(a) {
   return 0;
 }
 
-async function scan() {
-  try {
-    let id = cams[idx]?.deviceId || undefined;
-    controls = await reader.decodeFromVideoDevice(id, document.getElementById('video'), (r) => {
-      if (r) detect(r);
-    });
-  } catch (e) {
-    console.error(e);
-    mostrarErro('A câmara foi autorizada, mas o leitor de códigos não conseguiu iniciar.');
-  }
-}
-
 function detect(r) {
-  if (code) return;
+  if (!scanning || code) return;
+  scanning = false;
+  
   try { code = r.getText(); } catch (e) { code = String(r.text || ''); }
-  if (!code) return;
+  if (!code) { scanning = true; return; }
+  
   try { fmt = r.getBarcodeFormat(); } catch (e) { fmt = 'Código detectado'; }
   
   parar();
@@ -144,19 +123,23 @@ function detect(r) {
 
 function nome(f) {
   return ({
-    QR_CODE: 'QR Code',
-    CODE_128: 'Código 128',
-    CODE_39: 'Código 39',
-    CODE_93: 'Código 93',
-    EAN_13: 'EAN-13',
-    EAN_8: 'EAN-8',
-    UPC_A: 'UPC-A',
-    UPC_E: 'UPC-E',
-    ITF: 'ITF',
-    CODABAR: 'Codabar',
-    DATA_MATRIX: 'Data Matrix',
-    PDF_417: 'PDF417',
-    AZTEC: 'Aztec'
+    0: 'AZTEC',
+    1: 'CODABAR',
+    2: 'CODE_39',
+    3: 'CODE_93',
+    4: 'CODE_128',
+    5: 'DATA_MATRIX',
+    6: 'EAN_8',
+    7: 'EAN_13',
+    8: 'ITF',
+    9: 'MAXICODE',
+    10: 'PDF_417',
+    11: 'QR_CODE',
+    12: 'RSS_14',
+    13: 'RSS_EXPANDED',
+    14: 'UPC_A',
+    15: 'UPC_E',
+    16: 'UPC_EAN_EXTENSION'
   })[f] || f || 'Código detectado';
 }
 
@@ -175,9 +158,10 @@ function novamente() {
 }
 
 function parar() {
-  try { if (controls) controls.stop(); } catch (e) {}
-  controls = null;
-  try { if (reader) reader.reset(); } catch (e) {}
+  scanning = false;
+  try {
+    if (codeReader) codeReader.reset();
+  } catch (e) {}
   if (stream) {
     stream.getTracks().forEach(t => t.stop());
     stream = null;
